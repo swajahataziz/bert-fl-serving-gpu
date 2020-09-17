@@ -235,6 +235,14 @@ class BertLayer(Layer):
         else:
             return (input_shape[0][0], self.output_size)
 
+#Confidence estimation: please mind that it's only a proxy and does not represent a confidence interval
+
+def get_confidence(array):
+    elist=[]
+    for i,ele in enumerate(array):
+        elist.append((ele,i,))
+    elist.sort(key=lambda x: x[0], reverse=True)
+    return (elist[0][0]-elist[1][0])/elist[0][0]
 
 sess = tf.Session()
 global graph
@@ -280,29 +288,29 @@ def predict():
     Do an inference on a single request.
     """
     try:
-	    if request.content_type == 'application/json':
-	    	data = request.get_json()
-	    	names=['bias','clickbait','conspiracy','fake','hate','junksci','political','reliable','rumor','satire','unreliable']
-	    	art = data["emm_text_text"] # make sure the column is correct
-	    	test_examples = convert_text_to_examples([art], np.zeros(len([art])))
-	    	(test_input_ids, test_input_masks, test_segment_ids, test_labels) = convert_examples_to_features(tokenizer, test_examples, max_seq_length=max_seq_length)
-	    	with graph.as_default():
-			    set_session(sess)
-			    prediction = model.predict([test_input_ids, test_input_masks, test_segment_ids], verbose = 1)
-	    	l=np.asarray(prediction.flatten())
-	    	inf = names[l.argmax()]
-	    	data["prediction"]=inf
-	    	data["probability"]=str(np.max(l))
+        if request.content_type == 'application/json':
+            data = request.get_json()
+            names=['bias','clickbait','conspiracy','fake','hate','junksci','political','reliable','rumor','satire','unreliable']
+            art = data["emm_text_text"] # make sure the column is correct
+            test_examples = convert_text_to_examples([art], np.zeros(len([art])))
+            (test_input_ids, test_input_masks, test_segment_ids, test_labels) = convert_examples_to_features(tokenizer, test_examples, max_seq_length=max_seq_length)
+            with graph.as_default():
+                set_session(sess)
+                prediction = model.predict([test_input_ids, test_input_masks, test_segment_ids], verbose = 1)
+            inf = prediction[0].tolist()
+            conf=get_confidence(prediction.flatten()) 
+            data["probability"]=json.dumps(inf)
+            data["confidence"]=str(conf)
 
-	    	##data.to_json('Predictions.json') #######  does it have to be a certain path?
-	    else:
-	        return Response(response='This predictor only supports Json data', status=415, mimetype='text/plain')
-	    results_str = json.dumps(data)
+            ##data.to_json('Predictions.json') #######  does it have to be a certain path?
+        else:
+            return Response(response='This predictor only supports Json data', status=415, mimetype='text/plain')
+        results_str = json.dumps(data)
 
-	    # return
-	    return Response(response=results_str, status=200, mimetype='application/json')
+        # return
+        return Response(response=results_str, status=200, mimetype='application/json')
     except Exception:
-    	return traceback.format_exc()
+        return traceback.format_exc()
 
 @app.route('/invocations', methods=['POST'])
 @cross_origin()
@@ -311,30 +319,30 @@ def batch_predict():
     Do an inference on a batch of data.
     """
     try:
-	    if request.content_type == 'application/json':
-	    	names=['bias','clickbait','conspiracy','fake','hate','junksci','political','reliable','rumor','satire','unreliable']
-	    	data = request.get_json()
-	    	response_list = []
-	    	for i in data:
-	    		art = i["emm_text_text"] # make sure the column is correct
-	    		test_examples = convert_text_to_examples([art], np.zeros(len([art])))
-	    		(test_input_ids, test_input_masks, test_segment_ids, test_labels) = convert_examples_to_features(tokenizer, test_examples, max_seq_length=max_seq_length)
-		    	with graph.as_default():
-				    set_session(sess)
-				    prediction = model.predict([test_input_ids, test_input_masks, test_segment_ids], verbose = 1)
-		    	l=np.asarray(prediction.flatten())
-		    	inf = names[l.argmax()]
-		    	i["prediction"]=inf
-		    	i["probability"]=str(np.max(l))
-		    	response_list.append(i)
-	    	##data.to_json('Predictions.json') #######  does it have to be a certain path?
-	    else:
-	        return Response(response='This predictor only supports Json data', status=415, mimetype='text/plain')
-	    results_str = json.dumps(response_list)
-	    # return
-	    return Response(response=results_str, status=200, mimetype='application/json')
+        if request.content_type == 'application/json':
+            names=['bias','clickbait','conspiracy','fake','hate','junksci','political','reliable','rumor','satire','unreliable']
+            data = request.get_json()
+            response_list = []
+            for i in data:
+                art = i["emm_text_text"] # make sure the column is correct
+                test_examples = convert_text_to_examples([art], np.zeros(len([art])))
+                (test_input_ids, test_input_masks, test_segment_ids, test_labels) = convert_examples_to_features(tokenizer, test_examples, max_seq_length=max_seq_length)
+                with graph.as_default():
+                    set_session(sess)
+                    prediction = model.predict([test_input_ids, test_input_masks, test_segment_ids], verbose = 1)
+                inf = prediction[0].tolist()
+                conf=get_confidence(prediction.flatten()) 
+                i["probability"]=json.dumps(inf)
+                i["confidence"]=str(conf)
+                response_list.append(i)
+            ##data.to_json('Predictions.json') #######  does it have to be a certain path?
+        else:
+            return Response(response='This predictor only supports Json data', status=415, mimetype='text/plain')
+        results_str = json.dumps(response_list)
+        # return
+        return Response(response=results_str, status=200, mimetype='application/json')
     except Exception:
-    	return traceback.format_exc()
+        return traceback.format_exc()
 
 
 if __name__ == "__main__":
